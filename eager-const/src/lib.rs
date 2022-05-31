@@ -57,47 +57,47 @@ pub fn eager_const(input: TokenStream) -> TokenStream {
 
     let consts = parse_macro_input!(input as EagerConsts).0;
 
-    let crate_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
+    let crate_dir = env::var("CARGO_MANIFEST_DIR").expect("no CARGO_MANIFEST_DIR");
     let tmp_dir = Path::new("/tmp/.tmp-crate/");
 
-    //fs::remove_dir_all(tmp_path).ok();
+    fs::remove_dir_all(tmp_dir).ok();
 
-    fs::create_dir_all(tmp_dir).unwrap();
+    fs::create_dir_all(tmp_dir).expect("create_dir_all failed");
 
-    copy_crate(crate_dir, tmp_dir, 0).unwrap();
+    copy_crate(crate_dir, tmp_dir).expect("copy_crate failed");
 
-    modify_manifest(tmp_dir).unwrap();
+    modify_manifest(tmp_dir).expect("modify_manifest failed");
 
-    modify_main(tmp_dir.join("src/main.rs"), &consts).unwrap();
+    modify_main(tmp_dir.join("src/main.rs"), &consts).expect("modify_main failed");
 
-    let cargo_path = env::var("CARGO").unwrap();
+    let cargo_path = env::var("CARGO").expect("no CARGO");
 
     remove_cargo_env(Command::new(&cargo_path))
         .current_dir(tmp_dir)
         .arg("build")
         .spawn()
-        .unwrap()
+        .expect("build spawn failed")
         .wait()
-        .unwrap();
+        .expect("build wait failed");
 
     let output = remove_cargo_env(Command::new(&cargo_path))
         .current_dir(tmp_dir)
         .arg("run")
         .arg("--quiet")
         .output()
-        .unwrap();
+        .expect("run failed");
 
     if !output.status.success() {
         panic!("\nError: {}", String::from_utf8_lossy(&output.stderr));
     }
 
-    let values = str::from_utf8(&output.stdout).unwrap().lines().collect::<Vec<_>>();
+    let values = str::from_utf8(&output.stdout).expect("output is not utf-8").lines().collect::<Vec<_>>();
 
     let mut items = Vec::new();
 
     for (i, c) in consts.iter().enumerate() {
         let EagerConst { vis, name, ty, .. } = &c;
-        let value: syn::Expr = syn::parse_str(values[i]).unwrap();
+        let value: syn::Expr = syn::parse_str(values[i]).expect("syn::parse_str failed");
 
         items.push(quote! {
             #vis const #name: #ty = #value;
@@ -119,13 +119,14 @@ fn remove_cargo_env(mut cmd: Command) -> Command {
     cmd
 }
 
-fn copy_crate<F, T>(from: F, to: T, level: usize) -> std::io::Result<()>
+fn copy_crate<F, T>(from: F, to: T) -> std::io::Result<()>
 where
     F: AsRef<Path>, T: AsRef<Path>
 {
     let from = from.as_ref();
     let to = to.as_ref();
 
+    eprintln!("{:?} {:?}", from, to);
     for entry in fs::read_dir(from)? {
         let entry = entry?;
         let path = entry.path();
@@ -137,7 +138,8 @@ where
             let target = to.join(name);
 
             if path.is_dir() {
-                copy_crate(&path, &target, level + 1)?;
+                fs::create_dir(&target)?;
+                copy_crate(&path, &target)?;
             } else if path.is_file() {
                 fs::copy(&path, &target).map(|_| ())?;
             }
@@ -155,15 +157,15 @@ where
 
     let manifest_path = path.as_ref().join("Cargo.toml");
 
-    let mut manifest: Value = fs::read_to_string(&manifest_path)?.parse().unwrap();
+    let mut manifest: Value = fs::read_to_string(&manifest_path)?.parse().expect("manifest read_to_String failed");
 
-    let root = manifest.as_table_mut().unwrap();
+    let root = manifest.as_table_mut().expect("manifest is not a table");
 
     let deps = root
         .entry("dependencies")
         .or_insert_with(|| Value::Table(Table::new()))
         .as_table_mut()
-        .unwrap();
+        .expect("dependencies is not a table");
 
     for (name, value) in deps.iter_mut() {
         if name == "eager-const" {
@@ -173,16 +175,16 @@ where
             *value = dep.into();
         } else if let Some(dep) = value.as_table_mut() {
             if let Some(path) = dep.get_mut("path") {
-                *path = manifest_path.join(path.as_str().unwrap()).canonicalize().unwrap().to_str().unwrap().into();
+                *path = manifest_path.join(path.as_str().expect("path is not a string")).canonicalize().expect("canonicalize path failed").to_str().expect("dependency path is not a valid string").into();
             }
         }
     }
 
     let mut dep = Table::new();
-    dep.insert("path".into(), Path::new(SELF_PATH).join("../serde-rust").canonicalize().unwrap().to_str().unwrap().into());
+    dep.insert("path".into(), Path::new(SELF_PATH).join("../serde-rust").canonicalize().expect("canonicalize serde-rust failed").to_str().expect("serde-rust path is not a valid string").into());
     deps.insert("serde-rust".into(), dep.into());
 
-    fs::write(manifest_path, toml::to_string(&manifest).unwrap()).unwrap();
+    fs::write(manifest_path, toml::to_string(&manifest).expect("toml::to_string failed")).expect("manifest write failed");
 
     Ok(())
 }
@@ -195,7 +197,7 @@ where
 
     let path = path.as_ref();
 
-    let File { shebang, attrs, mut items } = parse_file(&fs::read_to_string(&path)?).unwrap();
+    let File { shebang, attrs, mut items } = parse_file(&fs::read_to_string(&path)?).expect("parse_file main failed");
 
     items.retain(|item| {
         if let Item::Fn(fnitem) = item {
@@ -211,7 +213,7 @@ where
         let init = &c.init;
 
         values.push(quote! {
-            println!("{}", serde_rust::to_string(&#init).unwrap());
+            println!("{}", serde_rust::to_string(&#init).expect("serde_rust failed"));
         });
     }
 
