@@ -1,16 +1,16 @@
 extern crate proc_macro;
 use proc_macro::TokenStream;
 
+use quote::quote;
 use std::env;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
 use std::str;
 use syn::{
-    parse_macro_input, Expr, Ident, Token, Type, Visibility,
     parse::{Parse, ParseStream, Result},
+    parse_macro_input, Expr, Ident, Token, Type, Visibility,
 };
-use quote::quote;
 
 struct EagerConsts(Vec<EagerConst>);
 
@@ -91,7 +91,10 @@ pub fn eager_const(input: TokenStream) -> TokenStream {
         panic!("\nError: {}", String::from_utf8_lossy(&output.stderr));
     }
 
-    let values = str::from_utf8(&output.stdout).expect("output is not utf-8").lines().collect::<Vec<_>>();
+    let values = str::from_utf8(&output.stdout)
+        .expect("output is not utf-8")
+        .lines()
+        .collect::<Vec<_>>();
 
     let mut items = Vec::new();
 
@@ -106,7 +109,8 @@ pub fn eager_const(input: TokenStream) -> TokenStream {
 
     (quote! {
         #(#items)*
-    }).into()
+    })
+    .into()
 }
 
 fn remove_cargo_env(mut cmd: Command) -> Command {
@@ -121,7 +125,8 @@ fn remove_cargo_env(mut cmd: Command) -> Command {
 
 fn copy_crate<F, T>(from: F, to: T) -> std::io::Result<()>
 where
-    F: AsRef<Path>, T: AsRef<Path>
+    F: AsRef<Path>,
+    T: AsRef<Path>,
 {
     let from = from.as_ref();
     let to = to.as_ref();
@@ -151,13 +156,15 @@ where
 
 fn modify_manifest<P>(path: P) -> std::io::Result<()>
 where
-    P: AsRef<Path>
+    P: AsRef<Path>,
 {
     use toml::value::*;
 
     let manifest_path = path.as_ref().join("Cargo.toml");
 
-    let mut manifest: Value = fs::read_to_string(&manifest_path)?.parse().expect("manifest read_to_String failed");
+    let mut manifest: Value = fs::read_to_string(&manifest_path)?
+        .parse()
+        .expect("manifest read_to_String failed");
 
     let root = manifest.as_table_mut().expect("manifest is not a table");
 
@@ -175,29 +182,52 @@ where
             *value = dep.into();
         } else if let Some(dep) = value.as_table_mut() {
             if let Some(path) = dep.get_mut("path") {
-                *path = manifest_path.join(path.as_str().expect("path is not a string")).canonicalize().expect("canonicalize path failed").to_str().expect("dependency path is not a valid string").into();
+                *path = manifest_path
+                    .join(path.as_str().expect("path is not a string"))
+                    .canonicalize()
+                    .expect("canonicalize path failed")
+                    .to_str()
+                    .expect("dependency path is not a valid string")
+                    .into();
             }
         }
     }
 
     let mut dep = Table::new();
-    dep.insert("path".into(), Path::new(SELF_PATH).join("../serde-rust").canonicalize().expect("canonicalize serde-rust failed").to_str().expect("serde-rust path is not a valid string").into());
+    dep.insert(
+        "path".into(),
+        Path::new(SELF_PATH)
+            .join("../serde-rust")
+            .canonicalize()
+            .expect("canonicalize serde-rust failed")
+            .to_str()
+            .expect("serde-rust path is not a valid string")
+            .into(),
+    );
     deps.insert("serde-rust".into(), dep.into());
 
-    fs::write(manifest_path, toml::to_string(&manifest).expect("toml::to_string failed")).expect("manifest write failed");
+    fs::write(
+        manifest_path,
+        toml::to_string(&manifest).expect("toml::to_string failed"),
+    )
+    .expect("manifest write failed");
 
     Ok(())
 }
 
 fn modify_main<P>(path: P, consts: &Vec<EagerConst>) -> std::io::Result<()>
 where
-    P: AsRef<Path>
+    P: AsRef<Path>,
 {
     use syn::*;
 
     let path = path.as_ref();
 
-    let File { shebang, attrs, mut items } = parse_file(&fs::read_to_string(&path)?).expect("parse_file main failed");
+    let File {
+        shebang,
+        attrs,
+        mut items,
+    } = parse_file(&fs::read_to_string(&path)?).expect("parse_file main failed");
 
     items.retain(|item| {
         if let Item::Fn(fnitem) = item {
@@ -225,7 +255,8 @@ where
         fn main() {
             #(#values)*
         }
-    }.to_string();
+    }
+    .to_string();
 
     fs::write(&path, new_main)
 }

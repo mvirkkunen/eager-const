@@ -1,5 +1,5 @@
-use serde_rust;
 use serde::Serialize;
+use serde_rust;
 
 #[derive(Serialize)]
 struct Foo {
@@ -8,6 +8,13 @@ struct Foo {
 }
 
 fn main() {
-    println!("{}", serde_rust::to_string(&Foo { name: "Kalle".into(), age: 42 }).unwrap());
+    println!(
+        "{}",
+        serde_rust::to_string(&Foo {
+            name: "Kalle".into(),
+            age: 42
+        })
+        .unwrap()
+    );
     println!("{}", serde_rust::to_string(&vec![1, 2, 3, 4]).unwrap());
 }
